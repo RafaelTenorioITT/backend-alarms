@@ -37,7 +37,7 @@ const express = require('express');
 const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const alarmNames = [
   "FALLA ALIM COM","GPO ELEC OPER","FALLA FUS DIST",
@@ -183,7 +183,8 @@ res.write(`data: ${JSON.stringify({
 });
 
 
+
 app.listen(PORT, () => {
-  console.log(`🚀 Backend activo en http://localhost:${PORT}`);
+  console.log("Servidor corriendo en puerto", PORT);
 });
 
