@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Monitor de Alarmas ESP32</title>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+<style>
+body { font-family: Arial, sans-serif; }
+
+.tabs { display: flex; cursor: pointer; margin-bottom: 10px; }
+
+.tab {
+  padding: 10px 20px;
+  border: 1px solid #ccc;
+  border-bottom: none;
+  background-color: #f1f1f1;
+}
+
+.tab.active { background-color: white; font-weight: bold; }
+.tab.alarm-active-tab { background-color: red !important; color: white; }
+
+.tab-content { display: none; border: 1px solid #ccc; padding: 10px; }
+.tab-content.active { display: block; }
+
+.main-container { display: flex; gap: 20px; }
+
+.alarms-container { width: 50%; }
+
+/* ===== ALARMAS HTML ===== */
+.alarm {
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.active { background-color: #ffe5e5; color: #b30000; font-weight: bold; }
+.inactive { background-color: #e5ffe5; color: #007000; }
+
+/* ===== SVG ===== */
+
+/* ===== SVG ===== */
+.svg-alarm {
+  stroke: #555;       /* líneas visibles */
+  fill: none;         /* SIN relleno en estado normal */
+  transition: all 0.3s ease;
+}
+
+.svg-alarm.alarm-on {
+  stroke: red;
+  fill: red;          /* SOLO se rellena cuando hay alarma */
+}
+
+.svg-alarm * {
+  stroke: inherit;
+  fill: inherit;
+}
+
+
+
+
+.history-container { width: 50%; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+
+th, td { border: 1px solid #ccc; padding: 4px; text-align: center; }
+
+th { background-color: #f1f1f1; }
+
+button, input[type="date"] { margin: 5px 4px; padding: 6px 10px; cursor: pointer; }
+</style>
+</head>
+
+<body>
+
+<h2>Estado de Alarmas ESP32 (EMQX)</h2>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab(0)">Historial OTY</div>
+  <div class="tab" onclick="showTab(1)">Historial ITR</div>
+  <div class="tab" onclick="showTab(2)">Alarmas OTY</div>
+  <div class="tab" onclick="showTab(3)">Alarmas ITR</div>
+</div>
+
+<!-- ================= HISTORIAL OTY ================= -->
+<div id="tab-0" class="tab-content active">
+  <div class="main-container">
+    <div class="alarms-container">
+      <div id="alarms-OTY"></div>
+    </div>
+
+    <div class="history-container">
+      <h3>Historial OTY</h3>
+      <input type="date" onchange="filterHistory('OTY', this.value)">
+      <button onclick="showAllHistory('OTY')">Mostrar todo</button>
+      <button onclick="clearHistory('OTY')">Limpiar historial</button>
+      <button onclick="downloadCSV('OTY')">Descargar Excel</button>
+
+      <table>
+        <thead>
+          <tr><th>Fecha</th><th>Hora</th><th>Estación</th><th>Alarma</th></tr>
+        </thead>
+        <tbody id="alarm-history-OTY"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ================= HISTORIAL ITR ================= -->
+<div id="tab-1" class="tab-content">
+  <div class="main-container">
+    <div class="alarms-container">
+      <div id="alarms-ITR"></div>
+    </div>
+
+    <div class="history-container">
+      <h3>Historial ITR</h3>
+      <input type="date" onchange="filterHistory('ITR', this.value)">
+      <button onclick="showAllHistory('ITR')">Mostrar todo</button>
+      <button onclick="clearHistory('ITR')">Limpiar historial</button>
+      <button onclick="downloadCSV('ITR')">Descargar Excel</button>
+
+      <table>
+        <thead>
+          <tr><th>Fecha</th><th>Hora</th><th>Estación</th><th>Alarma</th></tr>
+        </thead>
+        <tbody id="alarm-history-ITR"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ALARMAS OTY ================= -->
+<div id="tab-2" class="tab-content">
+
+<svg viewBox="0 0 600 400" width="100%" height="400">
+
+<!-- Caseta -->
+<polygon points="300,40 60,160 540,160"
+         fill="none" stroke="#000" stroke-width="3"/>
+<rect x="60" y="160" width="480" height="200"
+      fill="none" stroke="#000" stroke-width="3"/>
+
+<!-- ===== HABITACION DE BATERIAS ===== -->
+<g id="oty-room-batt" stroke="#000" stroke-width="2">
+
+  <!-- Cuarto -->
+  <rect x="80" y="210" width="220" height="130" fill="none"/>
+
+  <!-- Titulo -->
+  <text x="190" y="205"
+        text-anchor="middle"
+        font-size="14"
+        font-weight="bold"
+        fill="#000">
+    Habitación de Baterías
+  </text>
+
+  <!-- ===== PERSONA ===== -->
+ <g id="oty-person" class="svg-alarm" transform="translate(110,235)">
+
+
+    <circle cx="15" cy="10" r="8"/>
+    <line x1="15" y1="18" x2="15" y2="45"/>
+    <line x1="0" y1="30" x2="30" y2="30"/>
+    <line x1="15" y1="45" x2="5" y2="65"/>
+    <line x1="15" y1="45" x2="25" y2="65"/>
+
+  </g>
+
+  <!-- ===== BATERIA ===== -->
+ <g id="oty-battery" class="svg-alarm" transform="translate(200,245)">
+
+
+    <!-- Cuerpo -->
+    <rect x="0" y="15" width="70" height="35" fill="none"/>
+
+    <!-- Tapones -->
+    <rect x="15" y="5" width="10" height="10"/>
+    <rect x="45" y="5" width="10" height="10"/>
+
+    <!-- Simbolos -->
+    <text x="10" y="40" font-size="14">+</text>
+    <text x="55" y="40" font-size="14">−</text>
+
+  </g>
+
+</g>
+
+
+<!-- ===== PLANTA CD ===== -->
+<g id="oty-room-cd" stroke="#000" stroke-width="2">
+
+  <!-- Cuarto -->
+  <rect x="320" y="210" width="220" height="130" fill="none"/>
+
+  <!-- Titulo -->
+  <text x="430" y="205"
+        text-anchor="middle"
+        font-size="14"
+        font-weight="bold"
+        fill="#000">
+    Planta CD
+  </text>
+  <!-- ===== RECTIFICADOR CD ===== -->
+  <g id="oty-rectifier" class="svg-alarm" transform="translate(350,240)">
+
+    <!-- Gabinete -->
+    <rect x="0" y="0" width="70" height="50" rx="4" fill="none"/>
+
+    <!-- Ventilas -->
+    <line x1="10" y1="15" x2="60" y2="15"/>
+    <line x1="10" y1="25" x2="60" y2="25"/>
+    <line x1="10" y1="35" x2="60" y2="35"/>
+
+    <!-- Texto CD -->
+    <text x="35" y="65" text-anchor="middle" font-size="12">
+      CD
+    </text>
+
+  </g>
+  <!-- ===== BREAKERS ===== -->
+  <g id="oty-breakers" class="svg-alarm" transform="translate(440,245)">
+
+    <!-- Breaker 1 -->
+    <rect x="0" y="0" width="25" height="40" fill="none"/>
+    <line x1="12" y1="10" x2="12" y2="30"/>
+
+    <!-- Breaker 2 -->
+    <rect x="35" y="0" width="25" height="40" fill="none"/>
+    <line x1="47" y1="10" x2="47" y2="30"/>
+
+    <!-- Breaker 3 -->
+    <rect x="70" y="0" width="25" height="40" fill="none"/>
+    <line x1="82" y1="10" x2="82" y2="30"/>
+
+    <!-- Etiqueta -->
+    <text x="47" y="60" text-anchor="middle" font-size="12">
+      Breakers
+    </text>
+
+  </g>
+
+</g> <!-- FIN PLANTA CD -->
+
+
+  
+
+  <!-- TEMPERATURA -->
+  <g id="oty-temp" class="svg-alarm">
+    <line x1="300" y1="190" x2="300" y2="260"
+          stroke-width="8" stroke-linecap="round"/>
+    <circle cx="300" cy="280" r="16"/>
+    <text x="300" y="320" text-anchor="middle" font-size="14">
+      Temperatura
+    </text>
+  </g>
+
+  <!-- TIERRA -->
+  <g id="oty-tierra" class="svg-alarm">
+    <line x1="450" y1="210" x2="450" y2="260" stroke-width="4"/>
+    <line x1="430" y1="260" x2="470" y2="260" stroke-width="4"/>
+    <line x1="435" y1="270" x2="465" y2="270" stroke-width="3"/>
+    <line x1="440" y1="280" x2="460" y2="280" stroke-width="2"/>
+    <text x="450" y="320" text-anchor="middle" font-size="14">
+      Tierra
+    </text>
+  </g>
+
+</svg>
+</div>
+
+<!-- ================= ALARMAS ITR ================= -->
+<div id="tab-3" class="tab-content">
+  <h3>Alarmas ITR</h3>
+</div>
+
+<!-- ===== TU SCRIPT ORIGINAL (SIN CAMBIOS) ===== -->
+<script>
+
+
+const client = mqtt.connect(
+  'wss://d4e6f442.ala.us-east-1.emqxsl.com:8084/mqtt',
+  { clientId: 'web_' + Math.random().toString(16).substr(2,8),
+    username: 'Olivas', password: 'Jangel27' }
+);
+
+
+const alarmNames = [
+ "FALLA ALIM COM","GPO ELEC OPER","FALLA FUS DIST",
+ "FALLA RECT","ALTA TEMP","FALLA FUS VOLTA",
+ "BAT EN OPER","BAJO VOLTAJE",
+ "LIBRE 1","LIBRE 2","LIBRE 3","LIBRE 4",
+ "LIBRE 5","LIBRE 6","LIBRE 7","LIBRE 8"
+];
+
+let alarmHistoryOTY = [];
+let alarmHistoryITR = [];
+let visibleHistoryOTY = [];
+let visibleHistoryITR = [];
+let lastState = 0;
+
+window.onload = () => {
+  alarmHistoryOTY = JSON.parse(localStorage.getItem('alarmHistoryOTY_2026')) || [];
+  alarmHistoryITR = JSON.parse(localStorage.getItem('alarmHistoryITR_2026')) || [];
+
+  visibleHistoryOTY = [...alarmHistoryOTY];
+  visibleHistoryITR = [...alarmHistoryITR];
+
+  renderHistory('OTY', visibleHistoryOTY);
+  renderHistory('ITR', visibleHistoryITR);
+};
+
+client.on('connect', () => client.subscribe('esp32/External_Alarms_2'));
+
+client.on('message', (t, m) => {
+  const value = (m[0] << 8) | m[1];
+
+  updateStation('OTY', value);
+  updateStation('ITR', value);
+
+  updateSvgOTY(value);   // 👈 NUEVO
+
+  lastState = value;
+});
+
+
+function updateStation(station, value) {
+  const cont = document.getElementById(`alarms-${station}`);
+  cont.innerHTML = '';
+  let active = false;
+
+  for (let i = 15; i >= 0; i--) {
+    const bit = (value >> i) & 1;
+    const prev = (lastState >> i) & 1;
+
+    if (bit && !prev) logAlarm(station, alarmNames[15 - i]);
+    if (bit) active = true;
+
+    const d = document.createElement('div');
+    d.className = 'alarm ' + (bit ? 'active' : 'inactive');
+    d.textContent = alarmNames[15 - i] + (bit ? ' 🔥' : ' ✅');
+    cont.appendChild(d);
+  }
+  toggleAlarmTab(station === 'OTY' ? 0 : 1, active);
+}
+
+
+function updateSvgOTY(value) {
+
+  // Bit 11 → Temperatura
+  if ((value >> 11) & 1) {
+    activarSvg("oty-temp");
+  } else {
+    desactivarSvg("oty-temp");
+  }
+
+  // Bit 10 → Tierra
+  if ((value >> 10) & 1) {
+    activarSvg("oty-tierra");
+  } else {
+    desactivarSvg("oty-tierra");
+  }
+
+  // Bit 7 → BAT EN OPER
+  if ((value >> 7) & 1) {
+    activarSvg("oty-battery");
+  } else {
+    desactivarSvg("oty-battery");
+  }
+
+  // Bit 8 → Persona / Presencia
+  if ((value >> 8) & 1) {
+    activarSvg("oty-person");
+  } else {
+    desactivarSvg("oty-person");
+  }
+
+      // Bit 6 → RECTIFICADOR CD (LIBRE 2)
+  if ((value >> 6) & 1) {
+    activarSvg("oty-rectifier");
+  } else {
+    desactivarSvg("oty-rectifier");
+  }
+
+  // Bit 5 → BREAKERS (LIBRE 3)
+  if ((value >> 5) & 1) {
+    activarSvg("oty-breakers");
+  } else {
+    desactivarSvg("oty-breakers");
+  }
+}
+
+
+
+function logAlarm(st, al) {
+  const now = new Date();
+  const e = {
+    date: now.toLocaleDateString('es-MX'),
+    time: now.toLocaleTimeString('es-MX'),
+    station: st,
+    alarm: al
+  };
+
+  const ref = st === 'OTY' ? alarmHistoryOTY : alarmHistoryITR;
+  ref.push(e);
+
+  localStorage.setItem(`alarmHistory${st}_2026`, JSON.stringify(ref));
+  showAllHistory(st);
+}
+
+function renderHistory(st, data) {
+  const tb = document.getElementById(`alarm-history-${st}`);
+  tb.innerHTML = '';
+  data.forEach(e => {
+    tb.innerHTML += `<tr>
+      <td>${e.date}</td>
+      <td>${e.time}</td>
+      <td>${e.station}</td>
+      <td>${e.alarm}</td>
+    </tr>`;
+  });
+
+  if (st === 'OTY') visibleHistoryOTY = data;
+  else visibleHistoryITR = data;
+}
+
+function filterHistory(st, d) {
+  const src = st === 'OTY' ? alarmHistoryOTY : alarmHistoryITR;
+  const filtered = src.filter(e =>
+    new Date(e.date.split('/').reverse().join('-'))
+      .toISOString().slice(0,10) === d
+  );
+  renderHistory(st, filtered);
+}
+
+function showAllHistory(st) {
+  const src = st === 'OTY' ? alarmHistoryOTY : alarmHistoryITR;
+  renderHistory(st, [...src]);
+}
+
+function clearHistory(st) {
+  if (!confirm(`¿Borrar historial de ${st}?`)) return;
+
+  if (st === 'OTY') {
+    alarmHistoryOTY = [];
+    visibleHistoryOTY = [];
+    localStorage.removeItem('alarmHistoryOTY_2026');
+  } else {
+    alarmHistoryITR = [];
+    visibleHistoryITR = [];
+    localStorage.removeItem('alarmHistoryITR_2026');
+  }
+
+  renderHistory(st, []);
+}
+
+function downloadCSV(st) {
+  const src = st === 'OTY' ? visibleHistoryOTY : visibleHistoryITR;
+
+  let csv = 'Fecha,Hora,Estación,Alarma\n';
+  src.forEach(e => {
+    csv += `"${e.date}","${e.time}","${e.station}","${e.alarm}"\n`;
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `historial_${st}_2026.csv`;
+  a.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function toggleAlarmTab(i, a) {
+  document.querySelectorAll('.tab')[i]
+    .classList.toggle('alarm-active-tab', a);
+}
+
+function showTab(i) {
+  document.querySelectorAll('.tab').forEach((t, x) =>
+    t.classList.toggle('active', x === i)
+  );
+  document.querySelectorAll('.tab-content').forEach((c, x) =>
+    c.classList.toggle('active', x === i)
+  );
+}
+
+/* ===== SSE TIEMPO REAL (PARTE 4.2.2) ===== */
+
+const evtSource = new EventSource('http://localhost:3000/api/events');
+
+evtSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+
+  console.log('🔴 Evento SSE:', data);
+
+  const value = data.value;
+
+  // 👉 USAMOS TU LÓGICA EXISTENTE
+  updateStation('OTY', value);
+  updateStation('ITR', value);
+
+  updateSvgOTY(value);
+
+  lastState = value;
+};
+
+evtSource.onerror = (err) => {
+  console.error('❌ Error SSE', err);
+};
+
+
+</script>
+
+<!-- ===== FUNCIONES SVG ===== -->
+<script>
+function activarSvg(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add("alarm-on");
+}
+
+function desactivarSvg(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("alarm-on");
+}
+
+</script>
+
+
+
+</body>
+</html>
