@@ -1,44 +1,49 @@
 
-let sseClients = [];
+/*************************************************
+ * BACKEND ALARMAS – POSTGRESQL (SUPABASE)
+ *************************************************/
 
+const express = require('express');
+const cors = require('cors');
+const mqtt = require('mqtt');
 const path = require('path');
+const { Pool } = require('pg');
 
+/* ================================
+   CONFIGURACIÓN POSTGRESQL
+================================ */
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+pool
+  .query('SELECT 1')
+  .then(() => console.log('🗄️ Conectado a PostgreSQL (Supabase)'))
+  .catch(err => console.error('❌ Error PostgreSQL', err));
+
+/* ================================
+   APP EXPRESS
+================================ */
+const app = express();
+app.use(cors());
+app.use(express.static(path.join(__dirname, 'public')));
+
+const PORT = process.env.PORT || 3000;
+
+/* ================================
+   SSE
+================================ */
+let sseClients = [];
 
 function emitEvent(data) {
   const payload = `data: ${JSON.stringify(data)}\n\n`;
   sseClients.forEach(c => c.write(payload));
 }
 
-const sqlite3 = require('sqlite3').verbose();
-
-const db = new sqlite3.Database('./alarms.db', (err) => {
-  if (err) {
-    console.error('❌ Error al abrir BD', err.message);
-  } else {
-    console.log('🗄️ Base de datos SQLite lista');
-  }
-});
-
-db.run(`
-  CREATE TABLE IF NOT EXISTS alarm_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    station TEXT,
-    alarm_name TEXT,
-    state TEXT,
-    timestamp TEXT
-  )
-`);
-
-const cors = require('cors');
-
-const mqtt = require('mqtt');
-const express = require('express');
-
-const app = express();
-app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
-const PORT = process.env.PORT || 3000;
-
+/* ================================
+   ALARMAS
+================================ */
 const alarmNames = [
   "FALLA ALIM COM","GPO ELEC OPER","FALLA FUS DIST",
   "FALLA RECT","ALTA TEMP","FALLA FUS VOLTA",
@@ -47,8 +52,12 @@ const alarmNames = [
   "LIBRE 5","LIBRE 6","LIBRE 7","LIBRE 8"
 ];
 
+let lastStateOTY = 0;
+let currentValueOTY = 0;
 
-/* ===== CONFIG MQTT ===== */
+/* ================================
+   MQTT
+================================ */
 const mqttUrl = 'wss://d4e6f442.ala.us-east-1.emqxsl.com:8084/mqtt';
 
 const mqttOptions = {
@@ -57,12 +66,6 @@ const mqttOptions = {
   password: 'Jangel27'
 };
 
-let lastStateOTY = 0;
-let lastStateITR = 0;
-let currentValueOTY = 0;
-
-
-/* ===== MQTT ===== */
 const client = mqtt.connect(mqttUrl, mqttOptions);
 
 client.on('connect', () => {
@@ -70,7 +73,7 @@ client.on('connect', () => {
   client.subscribe('esp32/External_Alarms_2');
 });
 
-client.on('message', (topic, message) => {
+client.on('message', async (topic, message) => {
   const value = (message[0] << 8) | message[1];
   currentValueOTY = value;
   const now = new Date();
@@ -85,16 +88,18 @@ client.on('message', (topic, message) => {
       const event = bit ? 'ACTIVADA' : 'DESACTIVADA';
       const alarmName = alarmNames[15 - i];
 
-      console.log(
-        `⚠️ ${alarmName} ${event} @ ${now.toLocaleString('es-MX')}`
-      );
+      console.log(`⚠️ ${alarmName} ${event} @ ${now.toLocaleString('es-MX')}`);
 
-      // Guardar en BD
-      db.run(
-        `INSERT INTO alarm_events (station, alarm_name, state, timestamp)
-         VALUES (?, ?, ?, ?)`,
-        ['OTY', alarmName, event, now.toISOString()]
-      );
+      // 👉 GUARDAR EN POSTGRESQL
+      try {
+        await pool.query(
+          `INSERT INTO alarm_events (station, alarm_name, state, timestamp)
+           VALUES ($1, $2, $3, NOW())`,
+          ['OTY', alarmName, event]
+        );
+      } catch (err) {
+        console.error('❌ Error INSERT PostgreSQL', err);
+      }
 
       // 🔴 SSE → HISTORIAL
       emitEvent({
@@ -109,7 +114,7 @@ client.on('message', (topic, message) => {
 
   lastStateOTY = value;
 
-  // 🔵 SSE → ESTADO COMPLETO (rectángulos + SVG)
+  // 🔵 SSE → ESTADO COMPLETO
   emitEvent({
     type: 'state',
     station: 'OTY',
@@ -117,63 +122,64 @@ client.on('message', (topic, message) => {
   });
 });
 
-
-
-app.get('/api/history/:station', (req, res) => {
+/* ================================
+   API HISTORIAL
+================================ */
+app.get('/api/history/:station', async (req, res) => {
   const station = req.params.station;
 
-  db.all(
-    `SELECT * FROM alarm_events
-     WHERE station = ?
-     ORDER BY timestamp DESC
-     LIMIT 200`,
-    [station],
-    (err, rows) => {
-      if (err) {
-        res.status(500).json({ error: err.message });
-      } else {
-        res.json(rows);
-      }
-    }
-  );
+  try {
+    const result = await pool.query(
+      `SELECT station, alarm_name, state, timestamp
+       FROM alarm_events
+       WHERE station = $1
+       ORDER BY timestamp DESC
+       LIMIT 200`,
+      [station]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.delete('/api/history/:station', (req, res) => {
+app.delete('/api/history/:station', async (req, res) => {
   const station = req.params.station;
 
-  db.run(
-    `DELETE FROM alarm_events WHERE station = ?`,
-    [station],
-    function (err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-      } else {
-        res.json({
-          ok: true,
-          deleted: this.changes
-        });
-      }
-    }
-  );
+  try {
+    const result = await pool.query(
+      `DELETE FROM alarm_events WHERE station = $1`,
+      [station]
+    );
+
+    res.json({
+      ok: true,
+      deleted: result.rowCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-
+/* ================================
+   SSE ENDPOINT
+================================ */
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-
   res.flushHeaders();
-// 👉 Enviar estado actual inmediatamente
-res.write(`data: ${JSON.stringify({
-  station: 'OTY',
-  value: currentValueOTY,
-  initial: true
-})}\n\n`);
 
+  // Estado inicial
+  res.write(`data: ${JSON.stringify({
+    type: 'state',
+    station: 'OTY',
+    value: currentValueOTY,
+    initial: true
+  })}\n\n`);
 
   sseClients.push(res);
-
   console.log('🌐 Cliente SSE conectado');
 
   req.on('close', () => {
@@ -182,9 +188,9 @@ res.write(`data: ${JSON.stringify({
   });
 });
 
-
-
+/* ================================
+   START SERVER
+================================ */
 app.listen(PORT, () => {
-  console.log("Servidor corriendo en puerto", PORT);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
-
