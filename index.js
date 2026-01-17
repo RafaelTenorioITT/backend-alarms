@@ -15,7 +15,7 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  family: 4   // 👈 fuerza IPv4 (CLAVE)
+  family: 4
 });
 
 pool
