@@ -46,6 +46,7 @@ function emitEvent(data) {
 /* ================================
    ALARMAS
 ================================ */
+
 const alarmNames = [
   "FALLA ALIM COM","GPO ELEC OPER","FALLA FUS DIST",
   "FALLA RECT","ALTA TEMP","FALLA FUS VOLTA",
@@ -88,6 +89,8 @@ client.on('message', async (topic, message) => {
 
     if (bit !== prev) {
       const event = bit ? 'ACTIVADA' : 'DESACTIVADA';
+	const alarmIndex = 15 - i; // 0 a 15
+
       const alarmName = alarmNames[15 - i];
 
       console.log(`⚠️ ${alarmName} ${event} @ ${now.toLocaleString('es-MX')}`);
@@ -95,10 +98,11 @@ client.on('message', async (topic, message) => {
       // 👉 GUARDAR EN POSTGRESQL
       try {
         await pool.query(
-          `INSERT INTO alarm_events (station, alarm_name, state, timestamp)
-           VALUES ($1, $2, $3, NOW())`,
-          ['OTY', alarmName, event]
-        );
+  `INSERT INTO alarm_events (station, alarm, alarm_name, state)
+   VALUES ($1, $2, $3, $4)`,
+  ['OTY', alarmIndex, alarmName, event]
+);
+
       } catch (err) {
         console.error('❌ Error INSERT PostgreSQL', err);
       }
