@@ -18,6 +18,7 @@ const pool = new Pool({
   family: 4
 });
 
+
 pool
   .query('SELECT 1')
   .then(() => console.log('🗄️ Conectado a PostgreSQL (Supabase)'))
